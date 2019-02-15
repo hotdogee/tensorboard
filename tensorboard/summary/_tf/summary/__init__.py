@@ -29,7 +29,7 @@ else:
   # Check if we can directly import tf.compat.v2. We may not be able to if we
   # reached this import itself while importing tf.compat.v2.
   try:
-    import tensorflow.compat.v2 as test_import
+    from tensorflow.compat import v2 as test_import
     del test_import
   except ImportError:
     # If that failed, go "under the hood" to directly import the module that
