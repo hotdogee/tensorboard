@@ -110,6 +110,6 @@ export const palettes = {
   ]
 };
 
-export const standard = palettes.annotate32;
+export const standard = palettes.annotate19;
 
 }  // namespace tf_color_scale
