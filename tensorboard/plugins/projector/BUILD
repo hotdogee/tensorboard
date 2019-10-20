@@ -22,6 +22,9 @@ py_library(
         "//tensorboard/util:tb_logging",
         "@org_pocoo_werkzeug",
     ],
+    data = [
+        "//tensorboard/plugins/projector/tf_projector_plugin:projector_assets",
+    ],
 )
 
 py_library(
@@ -46,6 +49,7 @@ py_test(
         ":projector",
         "//tensorboard:expect_tensorflow_installed",
         "//tensorboard/util:test_util",
+        "@org_pythonhosted_six",
     ],
 )
 

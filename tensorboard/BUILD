@@ -6,7 +6,7 @@ package(default_visibility = [":internal"])
 load("//tensorboard/defs:web.bzl", "tf_web_library")
 load("//tensorboard/defs:zipper.bzl", "tensorboard_zip_file")
 
-licenses(["notice"])  # Apache 2.0
+licenses(["notice"])
 
 exports_files(["LICENSE"])  # Needed for internal repo.
 
@@ -24,6 +24,7 @@ py_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":default",
+        ":dynamic_plugins",
         ":program",
         "//tensorboard:expect_tensorflow_installed",
         "//tensorboard/plugins:base_plugin",
@@ -39,6 +40,7 @@ py_library(
     srcs_version = "PY2AND3",
     visibility = ["//visibility:public"],
     deps = [
+        ":errors",
         ":lazy",
         ":notebook",
         ":program",
@@ -52,11 +54,27 @@ py_test(
     size = "small",
     srcs = ["lib_test.py"],
     srcs_version = "PY2AND3",
-    visibility = ["//tensorboard:internal"],
     tags = ["support_notf"],
+    visibility = ["//tensorboard:internal"],
     deps = [
         ":lib",
         "@org_pythonhosted_six",
+    ],
+)
+
+py_library(
+    name = "errors",
+    srcs = ["errors.py"],
+    srcs_version = "PY2AND3",
+)
+
+py_test(
+    name = "errors_test",
+    srcs = ["errors_test.py"],
+    srcs_version = "PY2AND3",
+    deps = [
+        ":errors",
+        ":test",
     ],
 )
 
@@ -77,8 +95,8 @@ py_test(
     size = "small",
     srcs = ["manager_test.py"],
     srcs_version = "PY2AND3",
-    visibility = ["//tensorboard:internal"],
     tags = ["support_notf"],
+    visibility = ["//tensorboard:internal"],
     deps = [
         ":manager",
         ":test",
@@ -93,11 +111,14 @@ py_test(
     name = "manager_e2e_test",
     size = "large",  # spawns subprocesses, sleeps, makes requests to localhost
     timeout = "moderate",
+    srcs = ["manager_e2e_test.py"],
+    data = [
+        ":tensorboard",
+    ],
     # On Python 2, this test fails about 0.5% of the time when run with
     # high parallelism; TensorBoard subprocess time out instead of
     # launching successfully.
     flaky = True,
-    srcs = ["manager_e2e_test.py"],
     srcs_version = "PY2AND3",
     visibility = ["//tensorboard:internal"],
     deps = [
@@ -105,9 +126,6 @@ py_test(
         "//tensorboard:expect_tensorflow_installed",
         "@org_pythonhosted_mock",
         "@org_pythonhosted_six",
-    ],
-    data = [
-        ":tensorboard",
     ],
 )
 
@@ -129,9 +147,11 @@ py_library(
     deps = [
         ":manager",
         ":version",
+        "//tensorboard:expect_absl_flags_installed",
         "//tensorboard:expect_absl_logging_installed",
         "//tensorboard/backend:application",
         "//tensorboard/backend/event_processing:event_file_inspector",
+        "//tensorboard/util:argparse_util",
         "@org_pocoo_werkzeug",
         "@org_pythonhosted_six",
     ],
@@ -148,8 +168,10 @@ py_test(
         ":program",
         ":test",
         "//tensorboard/backend:application",
+        "//tensorboard/plugins:base_plugin",
         "//tensorboard/plugins/core:core_plugin",
         "@org_pocoo_werkzeug",
+        "@org_pythonhosted_mock",
     ],
 )
 
@@ -182,15 +204,21 @@ py_library(
         "//tensorboard/plugins/distribution:distributions_plugin",
         "//tensorboard/plugins/graph:graphs_plugin",
         "//tensorboard/plugins/histogram:histograms_plugin",
-        "//tensorboard/plugins/hparams:hparams_plugin_loader",
+        "//tensorboard/plugins/hparams:hparams_plugin",
         "//tensorboard/plugins/image:images_plugin",
         "//tensorboard/plugins/interactive_inference:interactive_inference_plugin_loader",
+        "//tensorboard/plugins/mesh:mesh_plugin",
         "//tensorboard/plugins/pr_curve:pr_curves_plugin",
         "//tensorboard/plugins/profile:profile_plugin_loader",
-        "//tensorboard/plugins/projector:projector_plugin",
         "//tensorboard/plugins/scalar:scalars_plugin",
         "//tensorboard/plugins/text:text_plugin",
-        "//tensorboard/plugins/mesh:mesh_plugin",
+    ],
+)
+
+py_library(
+    name = "dynamic_plugins",
+    deps = [
+        "//tensorboard/plugins/projector:projector_plugin",
     ],
 )
 
@@ -216,21 +244,46 @@ py_library(
     visibility = ["//visibility:public"],
 )
 
+config_setting(
+    name = "dev_build",
+    # consider changing this to fastbuild
+    values = {"compilation_mode": "dbg"},
+)
+
 tensorboard_zip_file(
     name = "webfiles",
     deps = [":assets"],
 )
 
+# TODO(stephanwlee): add ng_index.html to the srcs when it is ready for mass consumption.
 tf_web_library(
     name = "assets",
     srcs = [
         "//tensorboard/components:index.html",
         "//tensorboard/components:trace_viewer_index.html",
-    ],
+    ] + select({
+        "//tensorboard:dev_build": ["//tensorboard/components:ng_index"],
+        "//conditions:default": [],
+    }),
     path = "/",
     deps = [
+        ":html_assets_shasums",
         "@com_google_fonts_roboto",
     ],
+)
+
+tf_web_library(
+    name = "html_assets_shasums",
+    srcs = [
+        "//tensorboard/components:index.html.scripts_sha256",
+        "//tensorboard/components:trace_viewer_index.html.scripts_sha256",
+    ] + select({
+        "//tensorboard:dev_build": [
+            "//tensorboard/components:ng_index.html.scripts_sha256",
+        ],
+        "//conditions:default": [],
+    }),
+    path = "/_shasums",
 )
 
 py_library(
@@ -305,13 +358,6 @@ py_library(
     visibility = ["//visibility:public"],
 )
 
-py_library(
-    name = "tf_contrib_ffmpeg",
-    # This is a dummy rule for the open source world, which indicates
-    # that srcs dereference tf.contrib.ffmpeg.
-    visibility = ["//visibility:public"],
-)
-
 filegroup(
     name = "tf_web_library_default_typings",
     srcs = [
@@ -358,7 +404,6 @@ py_test(
         "//tensorboard/plugins/scalar:metadata",
         "//tensorboard/plugins/scalar:summary",
         "//tensorboard/util:tensor_util",
-        "//tensorboard/util:test_util",
     ],
 )
 
@@ -382,6 +427,7 @@ py_library(
     srcs_version = "PY2AND3",
     visibility = ["//visibility:public"],
     deps = [
+        "//tensorboard/backend:experiment_id",
         "@org_mozilla_bleach",
         "@org_pythonhosted_markdown",
         "@org_pythonhosted_six",
@@ -397,6 +443,7 @@ py_test(
     deps = [
         ":plugin_util",
         ":test",
+        "//tensorboard/backend:experiment_id",
         "@org_pythonhosted_six",
     ],
 )
@@ -415,9 +462,9 @@ py_library(
 
 py_test(
     name = "lazy_test",
+    size = "small",
     srcs = ["lazy_test.py"],
     srcs_version = "PY2AND3",
-    size = "small",
     tags = ["support_notf"],
     deps = [
         ":lazy",

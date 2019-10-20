@@ -43,14 +43,13 @@ from tensorboard.plugins.debugger import debugger_plugin_loader
 from tensorboard.plugins.distribution import distributions_plugin
 from tensorboard.plugins.graph import graphs_plugin
 from tensorboard.plugins.histogram import histograms_plugin
-from tensorboard.plugins.hparams import hparams_plugin_loader
+from tensorboard.plugins.hparams import hparams_plugin
 from tensorboard.plugins.image import images_plugin
 from tensorboard.plugins.interactive_inference import (
     interactive_inference_plugin_loader
 )
 from tensorboard.plugins.pr_curve import pr_curves_plugin
 from tensorboard.plugins.profile import profile_plugin_loader
-from tensorboard.plugins.projector import projector_plugin
 from tensorboard.plugins.scalar import scalars_plugin
 from tensorboard.plugins.text import text_plugin
 from tensorboard.plugins.mesh import mesh_plugin
@@ -61,22 +60,21 @@ logger = logging.getLogger(__name__)
 # Ordering matters. The order in which these lines appear determines the
 # ordering of tabs in TensorBoard's GUI.
 _PLUGINS = [
-    core_plugin.CorePluginLoader(),
+    core_plugin.CorePluginLoader,
     scalars_plugin.ScalarsPlugin,
     custom_scalars_plugin.CustomScalarsPlugin,
     images_plugin.ImagesPlugin,
     audio_plugin.AudioPlugin,
-    debugger_plugin_loader.DebuggerPluginLoader(),
+    debugger_plugin_loader.DebuggerPluginLoader,
     graphs_plugin.GraphsPlugin,
     distributions_plugin.DistributionsPlugin,
     histograms_plugin.HistogramsPlugin,
-    projector_plugin.ProjectorPlugin,
     text_plugin.TextPlugin,
     pr_curves_plugin.PrCurvesPlugin,
-    profile_plugin_loader.ProfilePluginLoader(),
-    beholder_plugin_loader.BeholderPluginLoader(),
-    interactive_inference_plugin_loader.InteractiveInferencePluginLoader(),
-    hparams_plugin_loader.HParamsPluginLoader(),
+    profile_plugin_loader.ProfilePluginLoader,
+    beholder_plugin_loader.BeholderPluginLoader,
+    interactive_inference_plugin_loader.InteractiveInferencePluginLoader,
+    hparams_plugin.HParamsPlugin,
     mesh_plugin.MeshPlugin,
 ]
 

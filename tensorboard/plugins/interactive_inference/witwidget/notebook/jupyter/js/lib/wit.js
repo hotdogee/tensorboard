@@ -28,18 +28,27 @@ var WITView = widgets.DOMWidgetView.extend({
     this.model.on('change:examples', this.examplesChanged, this);
     this.model.on('change:config', this.configChanged, this);
     this.model.on('change:inferences', this.inferencesChanged, this);
-    this.model.on('change:eligible_features',
-        this.eligibleFeaturesChanged, this);
+    this.model.on(
+      'change:eligible_features',
+      this.eligibleFeaturesChanged,
+      this
+    );
     this.model.on('change:mutant_charts', this.mutantChartsChanged, this);
     this.model.on('change:sprite', this.spriteChanged, this);
+    this.model.on('change:error', this.backendError, this);
+    this.model.on(
+      'change:custom_distance_dict',
+      this.customDistanceComputed,
+      this
+    );
   },
 
   /**
    * Loads up the WIT element.
    */
   loadAndCreateWhatIfToolElement: function() {
-    const height = parseInt(
-      this.model.attributes.layout.attributes.height, 10) - 20;
+    const height =
+      parseInt(this.model.attributes.layout.attributes.height, 10) - 20;
     const iframe = document.createElement('iframe');
 
     // Adjust WIT html location if running in a jupyter notebook
@@ -75,9 +84,11 @@ var WITView = widgets.DOMWidgetView.extend({
   isViewReady: function() {
     // Checks if the iframe has been created, WIT has been created in the iframe
     // and WIT has completed setup and its methods are created.
-    return this.iframe.contentDocument &&
+    return (
+      this.iframe.contentDocument &&
       this.iframe.contentDocument.getElementById('wit') &&
-      this.iframe.contentDocument.getElementById('wit').updateExampleContents;
+      this.iframe.contentDocument.getElementById('wit').updateExampleContents
+    );
   },
 
   /**
@@ -87,35 +98,55 @@ var WITView = widgets.DOMWidgetView.extend({
     this.view_ = this.iframe.contentDocument.getElementById('wit');
     // Add listeners for changes from WIT Polymer element. Passes changes
     // along to python.
-    this.view_.addEventListener('infer-examples', e => {
+    this.view_.addEventListener('infer-examples', (e) => {
       let i = this.model.get('infer') + 1;
       this.model.set('infer', i);
       this.touch();
     });
-    this.view_.addEventListener('delete-example', e => {
-      this.model.set('delete_example', {'index': e.detail.index});
+    this.view_.addEventListener('delete-example', (e) => {
+      this.model.set('delete_example', {index: e.detail.index});
       this.touch();
     });
-    this.view_.addEventListener('duplicate-example', e => {
-      this.model.set('duplicate_example', {'index': e.detail.index});
+    this.view_.addEventListener('duplicate-example', (e) => {
+      this.model.set('duplicate_example', {index: e.detail.index});
       this.touch();
     });
-    this.view_.addEventListener('update-example', e => {
-      this.model.set('update_example',
-          {'index': e.detail.index, 'example': e.detail.example});
+    this.view_.addEventListener('update-example', (e) => {
+      this.model.set('update_example', {
+        index: e.detail.index,
+        example: e.detail.example,
+      });
       this.touch();
     });
-    this.view_.addEventListener('get-eligible-features', e => {
+    this.view_.addEventListener('get-eligible-features', (e) => {
       let i = this.model.get('get_eligible_features') + 1;
       this.model.set('get_eligible_features', i);
       this.touch();
     });
-
+    this.view_.addEventListener('sort-eligible-features', (e) => {
+      this.model.set('sort_eligible_features', e.detail);
+      this.touch();
+    });
     this.inferMutantsCounter = 0;
-    this.view_.addEventListener('infer-mutants', e => {
-      e.detail['infer_mutants_counter'] = this.inferMutantsCounter++;
-      this.model.set('infer_mutants', e.detail);
+    this.view_.addEventListener('infer-mutants', (e) => {
+      this.model.set(
+        'infer_mutants',
+        Object.assign({}, e.detail, {
+          infer_mutants_counter_for_busting_cache: this.inferMutantsCounter++,
+        })
+      );
       this.mutantFeature = e.detail.feature_name;
+      this.touch();
+    });
+    this.computeDistanceCounter = 0;
+    this.view_.addEventListener('compute-custom-distance', (e) => {
+      this.model.set(
+        'compute_custom_distance',
+        Object.assign({}, e.detail, {
+          compute_distance_counter_for_busting_cache: this
+            .computeDistanceCounter++,
+        })
+      );
       this.touch();
     });
     this.setupComplete = true;
@@ -147,8 +178,10 @@ var WITView = widgets.DOMWidgetView.extend({
     const inferences = this.model.get('inferences');
     this.view_.labelVocab = inferences['label_vocab'];
     this.view_.inferences = inferences['inferences'];
-    this.view_.attributions = {indices: this.view_.inferences.indices,
-      attributions: inferences['attributions']}
+    this.view_.extraOutputs = {
+      indices: this.view_.inferences.indices,
+      extra: inferences['extra_outputs'],
+    };
   },
   eligibleFeaturesChanged: function() {
     if (!this.setupComplete) {
@@ -170,8 +203,11 @@ var WITView = widgets.DOMWidgetView.extend({
       return;
     }
     const chartInfo = this.model.get('mutant_charts');
-    this.view_.makeChartForFeature(chartInfo.chartType, this.mutantFeature,
-        chartInfo.data);
+    this.view_.makeChartForFeature(
+      chartInfo.chartType,
+      this.mutantFeature,
+      chartInfo.data
+    );
   },
   configChanged: function() {
     if (!this.setupComplete) {
@@ -215,6 +251,11 @@ var WITView = widgets.DOMWidgetView.extend({
     if ('target_feature' in config) {
       this.view_.selectedLabelFeature = config['target_feature'];
     }
+    if ('uses_custom_distance_fn' in config) {
+      this.view_.customDistanceFunctionSet = true;
+    } else {
+      this.view_.customDistanceFunctionSet = false;
+    }
   },
   spriteChanged: function() {
     if (!this.setupComplete) {
@@ -229,8 +270,23 @@ var WITView = widgets.DOMWidgetView.extend({
     this.view_.localAtlasUrl = spriteUrl;
     this.view_.updateSprite();
   },
+  backendError: function() {
+    const error = this.model.get('error');
+    this.view_.handleError(error['msg']);
+  },
+  customDistanceComputed: function() {
+    if (!this.setupComplete) {
+      if (this.isViewReady()) {
+        this.setupView();
+      }
+      requestAnimationFrame(() => this.customDistanceComputed());
+      return;
+    }
+    const customDistanceDict = this.model.get('custom_distance_dict');
+    this.view_.invokeCustomDistanceCallback(customDistanceDict);
+  },
 });
 
 module.exports = {
-  WITView : WITView
+  WITView: WITView,
 };

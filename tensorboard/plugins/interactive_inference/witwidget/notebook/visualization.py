@@ -15,8 +15,6 @@
 """Visualization API."""
 import sys
 import tensorflow as tf
-from numbers import Number
-from six import integer_types
 
 
 def _is_colab():
@@ -80,19 +78,18 @@ class WitConfigBuilder(object):
     Returns:
       self, in order to enabled method chaining.
     """
+    self.store('examples', examples)
     if feature_names:
       self.store('feature_names', feature_names)
     if len(examples) > 0 and not (
       isinstance(examples[0], tf.train.Example) or
       isinstance(examples[0], tf.train.SequenceExample)):
-      # For examples provided as JSON, convert them to tf.Examples internally.
-      converted_examples = self._convert_json_to_tf_examples(examples)
-      self.store('examples', converted_examples)
-    else:
-      self.store('examples', examples)
-      if len(examples) > 0:
-        self.store('are_sequence_examples',
-                  isinstance(examples[0], tf.train.SequenceExample))
+      self._set_uses_json_input(True)
+      if isinstance(examples[0], list):
+        self._set_uses_json_list(True)
+    elif len(examples) > 0:
+      self.store('are_sequence_examples',
+                 isinstance(examples[0], tf.train.SequenceExample))
     return self
 
   def set_model_type(self, model):
@@ -414,11 +411,11 @@ class WitConfigBuilder(object):
       - For regression: A 1D list of numbers, with a regression score for each
         example being predicted.
 
-    Optionally, if attributions can be returned by the model with each
-    prediction, then this method can return a dict with the key 'predictions'
-    containing the predictions result list described above, and with the key
-    'attributions' containing a list of attributions for each example that was
-    predicted.
+    Optionally, if attributions or other prediction-time information
+    can be returned by the model with each prediction, then this method
+    can return a dict with the key 'predictions' containing the predictions
+    result list described above, and with the key 'attributions' containing
+    a list of attributions for each example that was predicted.
 
     For each example, the attributions list should contain a dict mapping
     input feature names to attribution values for that feature on that example.
@@ -431,6 +428,12 @@ class WitConfigBuilder(object):
         feature values that there are attribution scores for. Index 1 contains
         a list of attribution values for the corresponding feature values in
         the first list.
+
+    This dict can contain any other keys, with their values being a list of
+    prediction-time strings or numbers for each example being predicted. These
+    values will be displayed in WIT as extra information for each example,
+    usable in the same ways by WIT as normal input features (such as for
+    creating plots and slicing performance data).
 
     Args:
       predict_fn: The custom python function which will be used for model
@@ -464,11 +467,11 @@ class WitConfigBuilder(object):
       - For regression: A 1D list of numbers, with a regression score for each
         example being predicted.
 
-    Optionally, if attributions can be returned by the model with each
-    prediction, then this method can return a dict with the key 'predictions'
-    containing the predictions result list described above, and with the key
-    'attributions' containing a list of attributions for each example that was
-    predicted.
+    Optionally, if attributions or other prediction-time information
+    can be returned by the model with each prediction, then this method
+    can return a dict with the key 'predictions' containing the predictions
+    result list described above, and with the key 'attributions' containing
+    a list of attributions for each example that was predicted.
 
     For each example, the attributions list should contain a dict mapping
     input feature names to attribution values for that feature on that example.
@@ -481,6 +484,12 @@ class WitConfigBuilder(object):
         feature values that there are attribution scores for. Index 1 contains
         a list of attribution values for the corresponding feature values in
         the first list.
+
+    This dict can contain any other keys, with their values being a list of
+    prediction-time strings or numbers for each example being predicted. These
+    values will be displayed in WIT as extra information for each example,
+    usable in the same ways by WIT as normal input features (such as for
+    creating plots and slicing performance data).
 
     Args:
       predict_fn: The custom python function which will be used for model
@@ -499,42 +508,31 @@ class WitConfigBuilder(object):
       self.set_compare_model_name('2')
     return self
 
-  def _convert_json_to_tf_examples(self, examples):
-    self._set_uses_json_input(True)
-    tf_examples = []
-    for json_ex in examples:
-      ex = tf.train.Example()
-      # JSON examples can be lists of values (for xgboost models for instance),
-      # or dicts of key/value pairs.
-      if isinstance(json_ex, list):
-        self._set_uses_json_list(True)
-        feature_names = self.config.get('feature_names')
-        for (i, value) in enumerate(json_ex):
-          # If feature names have been provided, use those feature names instead
-          # of list indices for feature name when storing as tf.Example.
-          if feature_names and len(feature_names) > i:
-            feat = feature_names[i]
-          else:
-            feat = str(i)
-          self._add_single_feature(feat, value, ex)
-        tf_examples.append(ex)
-      else:
-        for feat in json_ex:
-          self._add_single_feature(feat, json_ex[feat], ex)
-        tf_examples.append(ex)
-    return tf_examples
+  def set_custom_distance_fn(self, distance_fn):
+    """Sets a custom function for distance computation.
 
-  def _add_single_feature(self, feat, value, ex):
-    if isinstance(value, integer_types):
-      ex.features.feature[feat].int64_list.value.append(value)
-    elif isinstance(value, Number):
-      ex.features.feature[feat].float_list.value.append(value)
+    WIT can directly use a custom function for all distance computations within
+    the tool. In this case, the provided function should accept a query example
+    proto and a list of example protos to compute the distance against and
+    return a 1D list of numbers containing the distances.
+
+    Args:
+      distance_fn: The python function which will be used for distance
+      computation.
+
+    Returns:
+      self, in order to enabled method chaining.
+    """
+    if distance_fn is None:
+      self.delete('custom_distance_fn')
     else:
-      ex.features.feature[feat].bytes_list.value.append(value.encode('utf-8'))
+      self.store('custom_distance_fn', distance_fn)
+    return self
 
   def set_ai_platform_model(
     self, project, model, version=None, force_json_input=None,
-    adjust_prediction=None, adjust_example=None):
+    adjust_prediction=None, adjust_example=None, adjust_attribution=None,
+    service_name='ml', service_version='v1'):
     """Sets the model information for a model served by AI Platform.
 
     AI Platform Prediction a Google Cloud serving platform.
@@ -554,6 +552,15 @@ class WitConfigBuilder(object):
       to run prediction on and converts it to the format expected by the model.
       Necessary for example if the served model expects a single data value to
       run inference on instead of a list or dict of values.
+      adjust_attribution: Optional. If not None and the model returns attribution
+      information, then this function takes the attribution information for an
+      example and converts it to the format expected by the tool, which is a
+      dictionary of input feature names to attribution scores. Usually necessary
+      if making use of adjust_example and the model returns attribution results.
+      service_name: Optional. Name of the AI Platform Prediction service. Defaults
+      to 'ml'.
+      service_version: Optional. Version of the AI Platform Prediction service. Defaults
+      to 'v1'.
 
     Returns:
       self, in order to enabled method chaining.
@@ -561,6 +568,8 @@ class WitConfigBuilder(object):
     self.set_inference_address(project)
     self.set_model_name(model)
     self.store('use_aip', True)
+    self.store('aip_service_name', service_name)
+    self.store('aip_service_version', service_version)
     if version is not None:
       self.set_model_signature(version)
     if force_json_input:
@@ -569,11 +578,14 @@ class WitConfigBuilder(object):
       self.store('adjust_prediction', adjust_prediction)
     if adjust_example:
       self.store('adjust_example', adjust_example)
+    if adjust_attribution:
+      self.store('adjust_attribution', adjust_attribution)
     return self
 
   def set_compare_ai_platform_model(
     self, project, model, version=None, force_json_input=None,
-    adjust_prediction=None, adjust_example=None):
+    adjust_prediction=None, adjust_example=None, adjust_attribution=None,
+    service_name='ml', service_version='v1'):
     """Sets the model information for a second model served by AI Platform.
 
     AI Platform Prediction a Google Cloud serving platform.
@@ -593,6 +605,15 @@ class WitConfigBuilder(object):
       to run prediction on and converts it to the format expected by the model.
       Necessary for example if the served model expects a single data value to
       run inference on instead of a list or dict of values.
+      adjust_attribution: Optional. If not None and the model returns attribution
+      information, then this function takes the attribution information for an
+      example and converts it to the format expected by the tool, which is a
+      dictionary of input feature names to attribution scores. Usually necessary
+      if making use of adjust_example and the model returns attribution results.
+      service_name: Optional. Name of the AI Platform Prediction service. Defaults
+      to 'ml'.
+      service_version: Optional. Version of the AI Platform Prediction service. Defaults
+      to 'v1'.
 
     Returns:
       self, in order to enabled method chaining.
@@ -600,6 +621,8 @@ class WitConfigBuilder(object):
     self.set_compare_inference_address(project)
     self.set_compare_model_name(model)
     self.store('compare_use_aip', True)
+    self.store('compare_aip_service_name', service_name)
+    self.store('compare_aip_service_version', service_version)
     if version is not None:
       self.set_compare_model_signature(version)
     if force_json_input:
@@ -608,6 +631,8 @@ class WitConfigBuilder(object):
       self.store('compare_adjust_prediction', adjust_prediction)
     if adjust_example:
       self.store('compare_adjust_example', adjust_example)
+    if adjust_attribution:
+      self.store('compare_adjust_attribution', adjust_attribution)
     return self
 
   def set_target_feature(self, target):

@@ -20,9 +20,14 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import cgi
 import datetime
+import errno
+import json
+import random
 import shlex
 import sys
+import textwrap
 import time
 
 from tensorboard import manager
@@ -190,6 +195,28 @@ def start(args_string):
         )
     )
     print_or_update(message)
+
+  elif isinstance(start_result, manager.StartExecFailed):
+    the_tensorboard_binary = (
+        "%r (set by the `TENSORBOARD_BINARY` environment variable)"
+            % (start_result.explicit_binary,)
+        if start_result.explicit_binary is not None
+        else "`tensorboard`"
+    )
+    if start_result.os_error.errno == errno.ENOENT:
+      message = (
+          "ERROR: Could not find %s. Please ensure that your PATH contains "
+          "an executable `tensorboard` program, or explicitly specify the path "
+          "to a TensorBoard binary by setting the `TENSORBOARD_BINARY` "
+          "environment variable."
+          % (the_tensorboard_binary,)
+      )
+    else:
+      message = (
+          "ERROR: Failed to start %s: %s"
+          % (the_tensorboard_binary, start_result.os_error)
+      )
+    print_or_update(textwrap.fill(message))
 
   elif isinstance(start_result, manager.StartTimedOut):
     message = (
@@ -371,11 +398,29 @@ def _display_colab(port, height, display_handle):
 
 def _display_ipython(port, height, display_handle):
   import IPython.display
-  iframe = IPython.display.IFrame(
-      src="http://localhost:%d" % port,
-      height=height,
-      width="100%",
-  )
+
+  frame_id = "tensorboard-frame-{:08x}".format(random.getrandbits(64))
+  shell = """
+      <iframe id="%HTML_ID%" width="100%" height="%HEIGHT%" frameborder="0">
+      </iframe>
+      <script>
+        (function() {
+          const frame = document.getElementById(%JSON_ID%);
+          const url = new URL("/", window.location);
+          url.port = %PORT%;
+          frame.src = url;
+        })();
+      </script>
+  """
+  replacements = [
+      ("%HTML_ID%", cgi.escape(frame_id, quote=True)),
+      ("%JSON_ID%", json.dumps(frame_id)),
+      ("%PORT%", "%d" % port),
+      ("%HEIGHT%", "%d" % height),
+  ]
+  for (k, v) in replacements:
+    shell = shell.replace(k, v)
+  iframe = IPython.display.HTML(shell)
   if display_handle:
     display_handle.update(iframe)
   else:
